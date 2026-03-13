@@ -78,3 +78,20 @@ pub fn sum_if_non_zero() -> UnionStrategy<key, Int> {
     }
   }
 }
+
+/// A strategy for [`difference_with`](../dict.html#difference_with) that handles all three
+/// cases: key only in left, key only in right, and key in both.
+///
+/// The first `Option<value>` corresponds to the left value (if present), and the second
+/// corresponds to the right value (if present). Exactly one case holds at any given call:
+///
+/// - `(key, Some(left), None, keep, discard)` — key only in left
+/// - `(key, None, Some(right), keep, discard)` — key only in right
+/// - `(key, Some(left), Some(right), keep, discard)` — key in both
+pub type DifferenceStrategy<key, value> =
+  fn(key, value, value, KeepValue<key, value>, DiscardValue<key, value>) ->
+    Pairs<key, value>
+
+pub type DifferenceStrategyOnlySingleValue<key, value> =
+  fn(key, value, KeepValue<key, value>, DiscardValue<key, value>) ->
+    Pairs<key, value>
