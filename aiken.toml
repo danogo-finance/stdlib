@@ -1,6 +1,6 @@
 name = "danogo-finance/stdlib"
 version = "main"
-compiler = "v1.1.19"
+compiler = "v1.1.21"
 plutus = "v3"
 description = "The Aiken Standard Library"
 
