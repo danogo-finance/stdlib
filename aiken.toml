@@ -1,11 +1,11 @@
-name = "aiken-lang/stdlib"
+name = "danogo-finance/stdlib"
 version = "main"
 compiler = "v1.1.19"
 plutus = "v3"
 description = "The Aiken Standard Library"
 
 [repository]
-user = "aiken-lang"
+user = "danogo-finance"
 project = "stdlib"
 platform = "github"
 
