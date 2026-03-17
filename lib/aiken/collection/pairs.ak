@@ -831,3 +831,223 @@ test foldr_3() {
 
   foldr(fixture, 0, fn(k, v, result) { k * v + result }) == 1400
 }
+
+/// Extract a key-value pair from the `Pairs` by its key. If the key is found, the value and the remaining pairs are returned. If the key is not found, the `or_else` value and the unchanged pairs are returned.
+///
+/// ```aiken
+/// let v, p <- pairs.extract_or_else([], "a", fn() { 999 })
+/// v == 999
+/// p == []
+///
+/// let v, p <- pairs.extract_or_else([Pair("a", 1), Pair("b", 2)], "a", fn() { 0 })
+/// v == 1
+/// p == [Pair("b", 2)]
+///
+/// let v, p <- pairs.extract_or_else([Pair("a", 1), Pair("b", 2)], "c", fn() { 999 })
+/// v == 999
+/// p == [Pair("a", 1), Pair("b", 2)]
+/// ```
+pub fn extract_or_else(
+  self: Pairs<k, v>,
+  key: k,
+  or_else: fn() -> v,
+  return: fn(v, Pairs<k, v>) -> any,
+) -> any {
+  when self is {
+    [] -> return(or_else(), self)
+    [Pair(x_k, x_v) as x, ..xs] ->
+      if x_k == key {
+        return(x_v, xs)
+      } else {
+        let result, excluded <- extract_or_else(xs, key, or_else)
+        return(result, [x, ..excluded])
+      }
+  }
+}
+
+/// Extract from empty pairs - returns or_else value
+test extract_or_else_empty() {
+  let v, p <- extract_or_else([], "a", fn() { 999 })
+  and {
+    v == 999,
+    p == [],
+  }
+}
+
+/// Extract existing key - returns value and remaining pairs
+test extract_or_else_existing_key() {
+  let v, p <- extract_or_else([Pair("a", 1), Pair("b", 2)], "a", fn() { 0 })
+  and {
+    v == 1,
+    p == [Pair("b", 2)],
+  }
+}
+
+/// Extract non-existent key - returns or_else value and unchanged pairs
+test extract_or_else_nonexistent_key() {
+  let p_orig = [Pair("a", 1), Pair("b", 2)]
+  let v, p <- extract_or_else(p_orig, "c", fn() { 999 })
+  and {
+    v == 999,
+    p == p_orig,
+  }
+}
+
+/// Extract from pairs with single element
+test extract_or_else_single_element() {
+  let v, p <- extract_or_else([Pair("a", 100)], "a", fn() { 0 })
+  and {
+    v == 100,
+    p == [],
+  }
+}
+
+/// Extract first occurrence when duplicate keys exist
+test extract_or_else_first_duplicate() {
+  let
+    v,
+    p,
+  <-
+    extract_or_else([Pair("a", 1), Pair("a", 2), Pair("a", 3)], "a", fn() { 0 })
+  and {
+    v == 1,
+    p == [Pair("a", 2), Pair("a", 3)],
+  }
+}
+
+/// Extract from middle of pairs
+test extract_or_else_middle() {
+  let
+    v,
+    p,
+  <-
+    extract_or_else([Pair("a", 1), Pair("b", 2), Pair("c", 3)], "b", fn() { 0 })
+  and {
+    v == 2,
+    p == [Pair("a", 1), Pair("c", 3)],
+  }
+}
+
+/// Extract from end of pairs
+test extract_or_else_end() {
+  let
+    v,
+    p,
+  <-
+    extract_or_else([Pair("a", 1), Pair("b", 2), Pair("c", 3)], "c", fn() { 0 })
+  and {
+    v == 3,
+    p == [Pair("a", 1), Pair("b", 2)],
+  }
+}
+
+/// Extract with complex values
+test extract_or_else_complex_values() {
+  let
+    v,
+    p,
+  <-
+    extract_or_else(
+      [Pair("key1", [1, 2, 3]), Pair("key2", [4, 5, 6])],
+      "key1",
+      fn() { [] },
+    )
+  and {
+    v == [1, 2, 3],
+    p == [Pair("key2", [4, 5, 6])],
+  }
+}
+
+/// Extract with chained operations
+test extract_or_else_chained() {
+  let
+    v1,
+    p1,
+  <-
+    extract_or_else(
+      [Pair("x", 10), Pair("y", 20), Pair("z", 30)],
+      "y",
+      fn() { 0 },
+    )
+  let v2, p2 <- extract_or_else(p1, "z", fn() { 0 })
+  and {
+    v1 == 20,
+    v2 == 30,
+    p2 == [Pair("x", 10)],
+  }
+}
+
+/// Extract all elements one by one
+test extract_or_else_sequential() {
+  let
+    v1,
+    p1,
+  <-
+    extract_or_else([Pair("a", 1), Pair("b", 2), Pair("c", 3)], "a", fn() { 0 })
+  let v2, p2 <- extract_or_else(p1, "b", fn() { 0 })
+  let v3, p3 <- extract_or_else(p2, "c", fn() { 0 })
+  and {
+    v1 == 1,
+    v2 == 2,
+    v3 == 3,
+    p3 == [],
+  }
+}
+
+/// Extract with or_else called (key not found)
+test extract_or_else_or_else_called() {
+  let v, p <- extract_or_else([Pair("a", 1)], "b", fn() { 999 })
+  and {
+    v == 999,
+    p == [Pair("a", 1)],
+  }
+}
+
+/// Extract with duplicate keys, then extract different key
+test extract_or_else_duplicates_then_different() {
+  let
+    v1,
+    p1,
+  <-
+    extract_or_else([Pair("a", 1), Pair("a", 2), Pair("b", 3)], "a", fn() { 0 })
+  let v2, p2 <- extract_or_else(p1, "b", fn() { 0 })
+  and {
+    v1 == 1,
+    v2 == 3,
+    p2 == [Pair("a", 2)],
+  }
+}
+
+/// Extract from large pairs list
+test extract_or_else_large_list() {
+  let p =
+    [
+      Pair("a", 1), Pair("b", 2), Pair("c", 3), Pair("d", 4), Pair("e", 5),
+      Pair("f", 6), Pair("g", 7), Pair("h", 8),
+    ]
+  let v, remaining <- extract_or_else(p, "d", fn() { 0 })
+  and {
+    v == 4,
+    remaining == [
+      Pair("a", 1), Pair("b", 2), Pair("c", 3), Pair("e", 5), Pair("f", 6),
+      Pair("g", 7), Pair("h", 8),
+    ],
+  }
+}
+
+/// Extract preserves order of remaining elements
+test extract_or_else_preserves_order() {
+  let
+    v,
+    p,
+  <-
+    extract_or_else(
+      [Pair(1, "a"), Pair(2, "b"), Pair(3, "c"), Pair(4, "d")],
+      2,
+      fn() { "" },
+    )
+  and {
+    v == "b",
+    p == [Pair(1, "a"), Pair(3, "c"), Pair(4, "d")],
+  }
+}

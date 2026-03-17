@@ -16,6 +16,7 @@ use aiken/builtin
 use aiken/collection/dict/strategy.{
   DifferenceStrategy, DifferenceStrategyOnlySingleValue, UnionStrategy,
 }
+use aiken/collection/pairs
 
 /// An opaque `Dict`. The type is opaque because the module maintains some
 /// invariant, namely: there's only one occurrence of a given key in the dictionary.
@@ -1467,4 +1468,183 @@ test to_list_1() {
 
 test to_list_2() {
   to_pairs(fixture_1) == [Pair(bar, 14), Pair(foo, 42)]
+}
+
+/// Extract a key-value pair from the dictionary. If the key is not found, returns the result of `or_else` and the unchanged dict.
+///
+/// ```aiken
+/// let (value, dict) =
+///   dict.empty
+///     |> dict.insert(key: "a", value: 100)
+///     |> dict.insert(key: "b", value: 200)
+///     |> dict.pop_or_else(key: "c", or_else: fn() { 999 })
+///
+/// result == (999, dict.empty |> dict.insert("a", 100) |> dict.insert("b", 200))
+/// ```
+pub fn extract_or_else(
+  self: Dict<key, value>,
+  key: ByteArray,
+  or_else: fn() -> value,
+  return: fn(value, Dict<ByteArray, value>) -> result,
+) -> result {
+  let v, l <- pairs.extract_or_else(self.inner, key, or_else)
+  return(v, Dict { inner: l })
+}
+
+/// Extract from empty dict - returns or_else value
+test extract_or_else_empty() {
+  let v, d <- extract_or_else(empty, foo, fn() { 999 })
+  and {
+    v == 999,
+    d == empty,
+  }
+}
+
+/// Extract existing key - returns value and remaining dict
+test extract_or_else_existing_key() {
+  let m =
+    empty
+      |> insert(foo, 42)
+      |> insert(bar, 14)
+
+  let v, d <- extract_or_else(m, foo, fn() { 0 })
+  and {
+    v == 42,
+    d == ( empty |> insert(bar, 14) ),
+  }
+}
+
+/// Extract non-existent key - returns or_else value and unchanged dict
+test extract_or_else_nonexistent_key() {
+  let m =
+    empty
+      |> insert(foo, 42)
+      |> insert(bar, 14)
+
+  let v, d <- extract_or_else(m, baz, fn() { 999 })
+  and {
+    v == 999,
+    d == m,
+  }
+}
+
+/// Extract from dict with single element
+test extract_or_else_single_element() {
+  let m = empty |> insert(foo, 100)
+
+  let v, d <- extract_or_else(m, foo, fn() { 0 })
+  and {
+    v == 100,
+    d == empty,
+  }
+}
+
+/// Extract first key (alphabetically)
+test extract_or_else_first_key() {
+  let m =
+    empty
+      |> insert(baz, 100)
+      |> insert(foo, 200)
+      |> insert(bar, 300)
+
+  let v, d <- extract_or_else(m, bar, fn() { 0 })
+  and {
+    v == 300,
+    d == ( empty |> insert(baz, 100) |> insert(foo, 200) ),
+  }
+}
+
+/// Extract last key (alphabetically)
+test extract_or_else_last_key() {
+  let m =
+    empty
+      |> insert(foo, 100)
+      |> insert(bar, 200)
+      |> insert(baz, 300)
+
+  let v, d <- extract_or_else(m, foo, fn() { 0 })
+  and {
+    v == 100,
+    d == ( empty |> insert(bar, 200) |> insert(baz, 300) ),
+  }
+}
+
+/// Extract middle key
+test extract_or_else_middle_key() {
+  let m =
+    empty
+      |> insert(bar, 100)
+      |> insert(baz, 200)
+      |> insert(foo, 300)
+
+  let v, d <- extract_or_else(m, baz, fn() { 0 })
+  and {
+    v == 200,
+    d == ( empty |> insert(bar, 100) |> insert(foo, 300) ),
+  }
+}
+
+/// Extract from dict with multiple keys, verify order preserved
+test extract_or_else_multiple_keys() {
+  let m =
+    empty
+      |> insert("aaa", 1)
+      |> insert("bbb", 2)
+      |> insert("ccc", 3)
+      |> insert("ddd", 4)
+      |> insert("eee", 5)
+
+  let v, d <- extract_or_else(m, "ccc", fn() { 0 })
+  and {
+    v == 3,
+    to_pairs(d) == [
+      Pair("aaa", 1), Pair("bbb", 2), Pair("ddd", 4), Pair("eee", 5),
+    ],
+  }
+}
+
+/// Extract and verify remaining dict structure
+test extract_or_else_dict_structure() {
+  let m =
+    empty
+      |> insert("key1", 10)
+      |> insert("key2", 20)
+      |> insert("key3", 30)
+
+  let v, d <- extract_or_else(m, "key2", fn() { 0 })
+  and {
+    v == 20,
+    size(d) == 2,
+    has_key(d, "key1"),
+    has_key(d, "key3"),
+    !has_key(d, "key2"),
+  }
+}
+
+/// Extract with chaining operations
+test extract_or_else_chained() {
+  let m =
+    empty
+      |> insert("x", 100)
+      |> insert("y", 200)
+      |> insert("z", 300)
+
+  let v1, d1 <- extract_or_else(m, "y", fn() { 0 })
+  let v2, d2 <- extract_or_else(d1, "z", fn() { 0 })
+  and {
+    v1 == 200,
+    v2 == 300,
+    d2 == ( empty |> insert("x", 100) ),
+  }
+}
+
+/// Extract first occurrence if extracting non-existent key
+test extract_or_else_or_else_default() {
+  let m = empty |> insert(foo, 42)
+
+  let v, d <- extract_or_else(m, bar, fn() { 999 })
+  and {
+    v == 999,
+    d == m,
+  }
 }

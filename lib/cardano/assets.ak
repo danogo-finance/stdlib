@@ -1300,3 +1300,237 @@ test reduce_3() {
 pub fn to_dict(self: Value) -> Dict<PolicyId, Dict<AssetName, Int>> {
   self.inner
 }
+
+/// Extract the quantity of a given asset, returning both the quantity and the remaining value after extraction. If the asset is not present, returns `0` and the original value.
+/// Note: Using `quantity_of` is more efficient because it avoids the overhead of reconstructing the remaining value.
+///
+/// ```aiken
+/// let value = from_asset("a", "1", 10) |> add("a", "2", 20)
+/// let qty, rest <- extract_quantity_of(value, "a", "1")
+/// and {
+///   qty == 10,
+///   rest == from_asset("a", "2", 20),
+/// }
+/// ```
+pub fn extract_quantity_of(
+  self: Value,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+  return: fn(Int, Value) -> any,
+) -> any {
+  let
+    k,
+    l_pid,
+  <- dict.extract_or_else(self.inner, policy_id, fn() { dict.empty })
+  let q, l_asset <- dict.extract_or_else(k, asset_name, fn() { 0 })
+  return(
+    q,
+    builtin.if_then_else(
+      dict.is_empty(l_asset),
+      Value(l_pid),
+      Value(dict.insert(l_pid, policy_id, l_asset)),
+    ),
+  )
+}
+
+/// Extract from empty value - should return 0
+test extract_quantity_of_empty() {
+  let qty, rest <- extract_quantity_of(zero, "a", "1")
+  and {
+    qty == 0,
+    rest == zero,
+  }
+}
+
+/// Extract non-existent asset - should return 0
+test extract_quantity_of_nonexistent_asset() {
+  let v = from_asset("a", "1", 10)
+  let qty, rest <- extract_quantity_of(v, "a", "2")
+  and {
+    qty == 0,
+    rest == v,
+  }
+}
+
+/// Extract from non-existent policy - should return 0
+test extract_quantity_of_nonexistent_policy() {
+  let v = from_asset("a", "1", 10)
+  let qty, rest <- extract_quantity_of(v, "b", "1")
+  and {
+    qty == 0,
+    rest == v,
+  }
+}
+
+/// Extract single asset in a policy - policy should be removed
+test extract_quantity_of_last_asset_in_policy() {
+  let v = from_asset("a", "1", 42)
+  let qty, rest <- extract_quantity_of(v, "a", "1")
+  and {
+    qty == 42,
+    rest == zero,
+  }
+}
+
+/// Extract asset when multiple exist in same policy
+test extract_quantity_of_multiple_assets_same_policy() {
+  let v =
+    from_asset("a", "1", 10)
+      |> add("a", "2", 20)
+      |> add("a", "3", 30)
+
+  let qty, rest <- extract_quantity_of(v, "a", "2")
+  and {
+    qty == 20,
+    rest == ( from_asset("a", "1", 10) |> add("a", "3", 30) ),
+  }
+}
+
+/// Extract when multiple policies exist
+test extract_quantity_of_multiple_policies() {
+  let v =
+    from_asset("a", "1", 10)
+      |> add("b", "1", 20)
+      |> add("c", "1", 30)
+
+  let qty, rest <- extract_quantity_of(v, "b", "1")
+  and {
+    qty == 20,
+    rest == ( from_asset("a", "1", 10) |> add("c", "1", 30) ),
+  }
+}
+
+/// Extract Ada with Ada present
+test extract_quantity_of_ada() {
+  let v = from_lovelace(5000000) |> add("a", "1", 100)
+  let qty, rest <- extract_quantity_of(v, ada_policy_id, ada_asset_name)
+  and {
+    qty == 5000000,
+    rest == from_asset("a", "1", 100),
+  }
+}
+
+/// Extract from Ada-only value
+test extract_quantity_of_ada_only() {
+  let v = from_lovelace(1000000)
+  let qty, rest <- extract_quantity_of(v, ada_policy_id, ada_asset_name)
+  and {
+    qty == 1000000,
+    rest == zero,
+  }
+}
+
+/// Complex scenario: multiple policies and assets
+test extract_quantity_of_complex() {
+  let v =
+    from_lovelace(10000000)
+      |> add("policy1", "asset1", 100)
+      |> add("policy1", "asset2", 200)
+      |> add("policy2", "asset1", 300)
+      |> add("policy2", "asset2", 400)
+
+  let qty, rest <- extract_quantity_of(v, "policy1", "asset1")
+  and {
+    qty == 100,
+    rest == (
+      from_lovelace(10000000)
+        |> add("policy1", "asset2", 200)
+        |> add("policy2", "asset1", 300)
+        |> add("policy2", "asset2", 400)
+    ),
+  }
+}
+
+/// Extract last asset from middle policy
+test extract_quantity_of_remove_policy() {
+  let v =
+    from_asset("policy1", "asset1", 100)
+      |> add("policy2", "asset1", 200)
+      |> add("policy3", "asset1", 300)
+
+  let qty, rest <- extract_quantity_of(v, "policy2", "asset1")
+  and {
+    qty == 200,
+    rest == (
+      from_asset("policy1", "asset1", 100)
+        |> add("policy3", "asset1", 300)
+    ),
+  }
+}
+
+/// Extract with negative quantities (debt)
+test extract_quantity_of_negative() {
+  let v =
+    from_asset("a", "1", 100)
+      |> add("a", "2", -50)
+
+  let qty, rest <- extract_quantity_of(v, "a", "2")
+  and {
+    qty == -50,
+    rest == from_asset("a", "1", 100),
+  }
+}
+
+test benchmark_liquidate_assets_with_quantity_of() {
+  let v =
+    from_lovelace(1000000)
+      |> add("p1", "n1", 1)
+      |> add("p1", "n2", 42)
+      |> add("p2", "n2", 42)
+      |> add("p3", "n3", 42)
+      |> add("p4", "n4", 42)
+  let l =
+    [
+      Pair("p1", "n1"), Pair("p1", "n2"), Pair("p2", "n2"), Pair("p3", "n3"),
+      Pair("p4", "n4"),
+    ]
+  let
+    total,
+    rest,
+  <-
+    list.foldr2(
+      l,
+      0,
+      v,
+      fn(Pair(pid, asset_name), total, rest, return) {
+        let quantity = quantity_of(v, pid, asset_name)
+        return(total + quantity, rest |> add(pid, asset_name, -quantity))
+      },
+    )
+  and {
+    total == 169,
+    rest == from_lovelace(1000000),
+  }
+}
+
+test benchmark_liquidate_assets_with_extract_quantity_of() {
+  let v =
+    from_lovelace(1000000)
+      |> add("p1", "n1", 1)
+      |> add("p1", "n2", 42)
+      |> add("p2", "n2", 42)
+      |> add("p3", "n3", 42)
+      |> add("p4", "n4", 42)
+  let l =
+    [
+      Pair("p1", "n1"), Pair("p1", "n2"), Pair("p2", "n2"), Pair("p3", "n3"),
+      Pair("p4", "n4"),
+    ]
+  let
+    total,
+    rest,
+  <-
+    list.foldr2(
+      l,
+      0,
+      v,
+      fn(Pair(pid, asset_name), total, rest, return) {
+        let quantity, rest <- extract_quantity_of(rest, pid, asset_name)
+        return(total + quantity, rest)
+      },
+    )
+  and {
+    total == 169,
+    rest == from_lovelace(1000000),
+  }
+}
