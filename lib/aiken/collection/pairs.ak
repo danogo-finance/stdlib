@@ -832,91 +832,20 @@ test foldr_3() {
   foldr(fixture, 0, fn(k, v, result) { k * v + result }) == 1400
 }
 
-/// Extract a key-value pair from the `Pairs` by its key. If the key is not found, `None` is returned.
-/// Duplicate keys are not extracted. Only the **first** key found is extracted.
-/// The extracted key-value pair is removed from the `Pairs` and returned as well.
+/// Extract a key-value pair from the `Pairs` by its key. If the key is found, the value and the remaining pairs are returned. If the key is not found, the `or_else` value and the unchanged pairs are returned.
 ///
 /// ```aiken
-/// let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-/// let v, l <- extract(p, "a")
-/// and {
-///   v == Some(1),
-///   l == [Pair("b", 2), Pair("c", 3)],
-/// }
-/// ```
-pub fn extract(
-  self: Pairs<k, v>,
-  key: k,
-  return: fn(Option<v>, Pairs<k, v>) -> any,
-) -> any {
-  when self is {
-    [] -> return(None, self)
-    [Pair(x_k, x_v) as x, ..xs] ->
-      if x_k == key {
-        return(Some(x_v), xs)
-      } else {
-        let result, excluded <- extract(xs, key)
-        return(result, [x, ..excluded])
-      }
-  }
-}
-
-test extract_1() {
-  let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-  let v, l <- extract(p, "a")
-  and {
-    v == Some(1),
-    l == [Pair("b", 2), Pair("c", 3)],
-  }
-}
-
-test extract_2() {
-  let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-  let v, l <- extract(p, "b")
-  and {
-    v == Some(2),
-    l == [Pair("a", 1), Pair("c", 3)],
-  }
-}
-
-test extract_3() {
-  let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-  let v, l <- extract(p, "c")
-  and {
-    v == Some(3),
-    l == [Pair("a", 1), Pair("b", 2)],
-  }
-}
-
-test extract_4() {
-  let p = []
-  let v, l <- extract(p, "c")
-  and {
-    v == None,
-    l == p,
-  }
-}
-
-test extract_5() {
-  let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-  let v, l <- extract(p, "d")
-  and {
-    v == None,
-    l == p,
-  }
-}
-
-/// Like [`extract`](#extract) but allows to specify a default value to return if the key is not found.
-/// Duplicate keys are not extracted. Only the **first** key found is extracted.
-/// The extracted key-value pair is removed from the `Pairs` and returned as well.
+/// let v, p <- pairs.extract_or_else([], "a", fn() { 999 })
+/// v == 999
+/// p == []
 ///
-/// ```aiken
-/// let p = [Pair("a", 1), Pair("b", 2), Pair("c", 3)]
-/// let v, l <- extract_or_else(p, "a", fn() { 999 })
-/// and {
-///   v == 1,
-///   l == [Pair("b", 2), Pair("c", 3)],
-/// }
+/// let v, p <- pairs.extract_or_else([Pair("a", 1), Pair("b", 2)], "a", fn() { 0 })
+/// v == 1
+/// p == [Pair("b", 2)]
+///
+/// let v, p <- pairs.extract_or_else([Pair("a", 1), Pair("b", 2)], "c", fn() { 999 })
+/// v == 999
+/// p == [Pair("a", 1), Pair("b", 2)]
 /// ```
 pub fn extract_or_else(
   self: Pairs<k, v>,

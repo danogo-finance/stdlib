@@ -1302,7 +1302,7 @@ pub fn to_dict(self: Value) -> Dict<PolicyId, Dict<AssetName, Int>> {
 }
 
 /// Extract the quantity of a given asset, returning both the quantity and the remaining value after extraction. If the asset is not present, returns `0` and the original value.
-/// This is more efficient than a separate call to `quantity_of` and `difference` as it avoids traversing the data structure multiple times.
+/// Note: Using `quantity_of` is more efficient because it avoids the overhead of reconstructing the remaining value.
 ///
 /// ```aiken
 /// let value = from_asset("a", "1", 10) |> add("a", "2", 20)
@@ -1468,5 +1468,69 @@ test extract_quantity_of_negative() {
   and {
     qty == -50,
     rest == from_asset("a", "1", 100),
+  }
+}
+
+test benchmark_liquidate_assets_with_quantity_of() {
+  let v =
+    from_lovelace(1000000)
+      |> add("p1", "n1", 1)
+      |> add("p1", "n2", 42)
+      |> add("p2", "n2", 42)
+      |> add("p3", "n3", 42)
+      |> add("p4", "n4", 42)
+  let l =
+    [
+      Pair("p1", "n1"), Pair("p1", "n2"), Pair("p2", "n2"), Pair("p3", "n3"),
+      Pair("p4", "n4"),
+    ]
+  let
+    total,
+    rest,
+  <-
+    list.foldr2(
+      l,
+      0,
+      v,
+      fn(Pair(pid, asset_name), total, rest, return) {
+        let quantity = quantity_of(v, pid, asset_name)
+        return(total + quantity, rest |> add(pid, asset_name, -quantity))
+      },
+    )
+  and {
+    total == 169,
+    rest == from_lovelace(1000000),
+  }
+}
+
+test benchmark_liquidate_assets_with_extract_quantity_of() {
+  let v =
+    from_lovelace(1000000)
+      |> add("p1", "n1", 1)
+      |> add("p1", "n2", 42)
+      |> add("p2", "n2", 42)
+      |> add("p3", "n3", 42)
+      |> add("p4", "n4", 42)
+  let l =
+    [
+      Pair("p1", "n1"), Pair("p1", "n2"), Pair("p2", "n2"), Pair("p3", "n3"),
+      Pair("p4", "n4"),
+    ]
+  let
+    total,
+    rest,
+  <-
+    list.foldr2(
+      l,
+      0,
+      v,
+      fn(Pair(pid, asset_name), total, rest, return) {
+        let quantity, rest <- extract_quantity_of(rest, pid, asset_name)
+        return(total + quantity, rest)
+      },
+    )
+  and {
+    total == 169,
+    rest == from_lovelace(1000000),
   }
 }
