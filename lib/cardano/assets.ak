@@ -914,6 +914,87 @@ test add_5() {
   v == zero
 }
 
+pub fn difference(left v0: Value, right v1: Value) -> Value {
+  Value(
+    dict.difference_with(
+      v0.inner,
+      v1.inner,
+      fn(_, a0, a1, keep, discard) {
+        let result =
+          dict.difference_with(
+            a0,
+            a1,
+            dict_strategy.difference_if_non_zero(),
+            dict_strategy.negate(),
+          )
+        if dict.is_empty(result) {
+          discard()
+        } else {
+          keep(result)
+        }
+      },
+      fn(_k, right, keep, _discard) {
+        keep(dict.map(right, fn(_, qty) { -qty }))
+      },
+    ),
+  )
+}
+
+test difference_1() {
+  let v0 = from_lovelace(5)
+  let v1 = from_lovelace(3)
+
+  let diff = from_lovelace(2)
+
+  and {
+    (difference(v0, v1) == diff)?,
+    (merge(v0, negate(v1)) == diff)?,
+  }
+}
+
+test difference_2() {
+  let v =
+    zero
+      |> add(#"acab", #"beef", 321)
+      |> add(#"f00d", #"cafe", 42)
+
+  and {
+    (difference(v, v) == zero)?,
+    (merge(v, negate(v)) == zero)?,
+  }
+}
+
+test difference_3() {
+  let left = zero |> add(#"00", #"aa", 5)
+  let right = zero |> add(#"01", #"bb", 3)
+
+  let diff = [(#"00", #"aa", 5), (#"01", #"bb", -3)]
+
+  and {
+    (flatten(difference(left, right)) == diff)?,
+    (flatten(merge(left, negate(right))) == diff)?,
+  }
+}
+
+test difference_4() {
+  let left =
+    zero
+      |> add(#"00", #"aa", 10)
+      |> add(#"00", #"bb", 4)
+
+  let right =
+    zero
+      |> add(#"00", #"aa", 10)
+      |> add(#"00", #"bb", 1)
+
+  let diff = [(#"00", #"bb", 3)]
+
+  and {
+    (flatten(difference(left, right)) == diff)?,
+    (flatten(merge(left, negate(right))) == diff)?,
+  }
+}
+
 /// Combine two `Value` together.
 pub fn merge(left v0: Value, right v1: Value) -> Value {
   Value(
@@ -994,111 +1075,6 @@ test merge_5() {
 pub fn negate(self: Value) -> Value {
   dict.map(self.inner, fn(_, a) { dict.map(a, fn(_, q) { 0 - q }) })
     |> Value
-}
-
-pub fn difference(left v0: Value, right v1: Value) -> Value {
-  let with_qty =
-    fn(_k, q0, q1, keep, discard) {
-      if q0 - q1 == 0 {
-        discard()
-      } else {
-        keep(q0 - q1)
-      }
-    }
-  let with_qty_only_right =
-    fn(_k, q1, keep, _discard) { keep(-q1) }
-
-  Value(
-    dict.difference_with(
-      v0.inner,
-      v1.inner,
-      fn(_, a0, a1, keep, discard) {
-        let result = dict.difference_with(a0, a1, with_qty, with_qty_only_right)
-        if dict.is_empty(result) {
-          discard()
-        } else {
-          keep(result)
-        }
-      },
-      fn(_k, right, keep, _discard) {
-        keep(
-          dict.difference_with(dict.empty, right, with_qty, with_qty_only_right),
-        )
-      },
-    ),
-  )
-}
-
-test difference_1() {
-  let v0 = from_lovelace(5)
-  let v1 = from_lovelace(3)
-  difference(v0, v1) == from_lovelace(2)
-}
-
-test difference_1_with_negate_merge() {
-  let v0 = from_lovelace(5)
-  let v1 = from_lovelace(3)
-  merge(v0, negate(v1)) == from_lovelace(2)
-}
-
-test difference_2() {
-  let v =
-    zero
-      |> add(#"acab", #"beef", 321)
-      |> add(#"f00d", #"cafe", 42)
-
-  difference(v, v) == zero
-}
-
-test difference_2_with_negate_merge() {
-  let v =
-    zero
-      |> add(#"acab", #"beef", 321)
-      |> add(#"f00d", #"cafe", 42)
-
-  merge(v, negate(v)) == zero
-}
-
-test difference_3() {
-  let left = zero |> add(#"00", #"aa", 5)
-  let right = zero |> add(#"01", #"bb", 3)
-
-  flatten(difference(left, right)) == [(#"00", #"aa", 5), (#"01", #"bb", -3)]
-}
-
-test difference_3_with_negate_merge() {
-  let left = zero |> add(#"00", #"aa", 5)
-  let right = zero |> add(#"01", #"bb", 3)
-
-  flatten(merge(left, negate(right))) == [(#"00", #"aa", 5), (#"01", #"bb", -3)]
-}
-
-test difference_4() {
-  let left =
-    zero
-      |> add(#"00", #"aa", 10)
-      |> add(#"00", #"bb", 4)
-
-  let right =
-    zero
-      |> add(#"00", #"aa", 10)
-      |> add(#"00", #"bb", 1)
-
-  flatten(difference(left, right)) == [(#"00", #"bb", 3)]
-}
-
-test difference_4_with_negate_merge() {
-  let left =
-    zero
-      |> add(#"00", #"aa", 10)
-      |> add(#"00", #"bb", 4)
-
-  let right =
-    zero
-      |> add(#"00", #"aa", 10)
-      |> add(#"00", #"bb", 1)
-
-  flatten(merge(left, negate(right))) == [(#"00", #"bb", 3)]
 }
 
 /// Get a subset of the assets restricted to the given policies.

@@ -5,6 +5,11 @@ pub type UnionStrategy<key, value> =
   fn(key, value, value, KeepValue<key, value>, DiscardValue<key, value>) ->
     Pairs<key, value>
 
+/// A strategy for inserting a value from a dictionnary into another.
+pub type InsertStrategy<key, value> =
+  fn(key, value, KeepValue<key, value>, DiscardValue<key, value>) ->
+    Pairs<key, value>
+
 /// A callback to keep a combined value at a given key
 pub type KeepValue<key, value> =
   fn(value) -> Pairs<key, value>
@@ -13,7 +18,80 @@ pub type KeepValue<key, value> =
 pub type DiscardValue<key, value> =
   fn() -> Pairs<key, value>
 
+// ### Insert Strategies
+
+/// Discard the value
+///
+/// ```aiken
+/// fn(_key, _right, _keep, discard) { discard() }
+/// ```
+pub fn discard() -> InsertStrategy<key, value> {
+  fn(_key, _right, _keep, discard) { discard() }
+}
+
+/// Keep and insert the value.
+///
+/// ```aiken
+/// fn(_key, right, keep, _discard) { keep(right) }
+/// ```
+pub fn keep() -> InsertStrategy<key, value> {
+  fn(_key, right, keep, _discard) { keep(right) }
+}
+
+/// Keep the value and negate it, effectively treating the left-side as `0`.
+///
+/// ```aiken
+/// fn(_key, right, keep, _discard) { keep(-right) }
+/// ```
+pub fn negate() -> InsertStrategy<key, Int> {
+  fn(_key, right, keep, _discard) { keep(-right) }
+}
+
+/// A strategy which always fail, indicating that values should always be present
+/// on the left dictionary.
+///
+/// ```aiken
+/// fn(_key, _right, _keep, _discard) { fail }
+/// ```
+pub fn never() -> InsertStrategy<ByteArray, value> {
+  fn(key: ByteArray, _right, _keep, _discard) {
+    trace @"InsertStrategy.never": key
+    fail
+  }
+}
+
 // ### Union Strategies
+
+/// Combine values by taking their difference.
+///
+/// ```aiken
+/// fn(_key, left, right, keep, _discard) { keep(left - right) }
+/// ```
+pub fn difference() -> UnionStrategy<key, Int> {
+  fn(_key, left, right, keep, _discard) { keep(left - right) }
+}
+
+/// Keep the resulting difference only if it's non zero; otherwise discard the key entirely.
+///
+/// ```aiken
+/// fn(_key, left, right, keep, discard) {
+///   let value = left - right
+///   if value != 0 {
+///     keep(value)
+///   } else {
+///     discard()
+///   }
+/// }
+/// ```
+pub fn difference_if_non_zero() -> UnionStrategy<key, Int> {
+  fn(_key, left, right, keep, discard) {
+    if left == right {
+      discard()
+    } else {
+      keep(left - right)
+    }
+  }
+}
 
 /// A strategy which always fail, enforcing the dict contains no duplicate.
 ///
@@ -22,9 +100,10 @@ pub type DiscardValue<key, value> =
 ///   fail @"unexpected duplicate key found in dict."
 /// }
 /// ```
-pub fn expect_no_duplicate() -> UnionStrategy<key, value> {
-  fn(_, _, _, _, _) {
-    fail @"unexpected duplicate key found in dict."
+pub fn expect_no_duplicate() -> UnionStrategy<ByteArray, value> {
+  fn(key: ByteArray, _, _, _, _) {
+    trace @"UnionStrategy.expect_no_duplicate": key
+    fail
   }
 }
 
@@ -70,28 +149,10 @@ pub fn sum() -> UnionStrategy<key, Int> {
 /// ```
 pub fn sum_if_non_zero() -> UnionStrategy<key, Int> {
   fn(_key, left, right, keep, discard) {
-    let value = left + right
-    if value == 0 {
+    if left == -right {
       discard()
     } else {
-      keep(value)
+      keep(left + right)
     }
   }
 }
-
-/// A strategy for [`difference_with`](../dict.html#difference_with) that handles all three
-/// cases: key only in left, key only in right, and key in both.
-///
-/// The first `Option<value>` corresponds to the left value (if present), and the second
-/// corresponds to the right value (if present). Exactly one case holds at any given call:
-///
-/// - `(key, Some(left), None, keep, discard)` — key only in left
-/// - `(key, None, Some(right), keep, discard)` — key only in right
-/// - `(key, Some(left), Some(right), keep, discard)` — key in both
-pub type DifferenceStrategy<key, value> =
-  fn(key, value, value, KeepValue<key, value>, DiscardValue<key, value>) ->
-    Pairs<key, value>
-
-pub type DifferenceStrategyOnlySingleValue<key, value> =
-  fn(key, value, KeepValue<key, value>, DiscardValue<key, value>) ->
-    Pairs<key, value>

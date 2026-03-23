@@ -13,9 +13,7 @@
 //// > [`dict.from_ascending_list`](#from_ascending_list).
 
 use aiken/builtin
-use aiken/collection/dict/strategy.{
-  DifferenceStrategy, DifferenceStrategyOnlySingleValue, UnionStrategy,
-}
+use aiken/collection/dict/strategy.{InsertStrategy, UnionStrategy}
 use aiken/collection/pairs
 
 /// An opaque `Dict`. The type is opaque because the module maintains some
@@ -694,6 +692,188 @@ test delete_6() {
   delete(m, "bcd") == m
 }
 
+/// Like [`union_with`](#union_with) but allows specifying the behavior to adopt when a key is present
+/// only in the right dictionary. The first value received correspond to the value in the right
+/// dictionnary. When passing `None`, the value is removed and not present in the union.
+///
+/// ```aiken
+/// let left_dict = dict.from_pairs([Pair("a", 100), Pair("b", 200)])
+/// let right_dict = dict.from_pairs([Pair("a", 150), Pair("c", 300)])
+///
+/// let result =
+///   dict.difference_with(
+///     left_dict,
+///     right_dict,
+///     fn(_k, _v_left, _v_right, _keep, discard) { discard() },
+///     fn(_k, v_right, keep, _discard) { keep(v_right) },
+///   )
+///     |> dict.to_pairs()
+///
+/// result == [Pair("b", 200)]
+/// ```
+pub fn difference_with(
+  left: Dict<key, value>,
+  right: Dict<key, value>,
+  with_both: UnionStrategy<ByteArray, value>,
+  with_right: InsertStrategy<ByteArray, value>,
+) -> Dict<key, value> {
+  Dict {
+    inner: do_difference_with(left.inner, right.inner, with_both, with_right),
+  }
+}
+
+fn do_difference_with(
+  left: Pairs<ByteArray, value>,
+  right: Pairs<ByteArray, value>,
+  with_both: UnionStrategy<ByteArray, value>,
+  with_right: InsertStrategy<ByteArray, value>,
+) -> Pairs<ByteArray, value> {
+  when left is {
+    [] -> do_difference_only_right(right, with_right)
+    [Pair(k, v), ..rest_left] ->
+      when right is {
+        [] -> left
+        [Pair(k2, v2), ..rest_right] ->
+          if builtin.less_than_bytearray(k, k2) {
+            [
+              Pair(k, v),
+              ..do_difference_with(rest_left, right, with_both, with_right)
+            ]
+          } else if k == k2 {
+            with_both(
+              k,
+              v,
+              v2,
+              fn(combined) {
+                [
+                  Pair(k, combined),
+                  ..do_difference_with(
+                    rest_left,
+                    rest_right,
+                    with_both,
+                    with_right,
+                  )
+                ]
+              },
+              fn() {
+                do_difference_with(rest_left, rest_right, with_both, with_right)
+              },
+            )
+          } else {
+            with_right(
+              k2,
+              v2,
+              fn(combined) {
+                [
+                  Pair(k2, combined),
+                  ..do_difference_with(left, rest_right, with_both, with_right)
+                ]
+              },
+              fn() {
+                do_difference_with(left, rest_right, with_both, with_right)
+              },
+            )
+          }
+      }
+  }
+}
+
+fn do_difference_only_right(
+  self: Pairs<ByteArray, value>,
+  with_right: InsertStrategy<ByteArray, value>,
+) {
+  when self is {
+    [] -> []
+    [Pair(k2, v2), ..rest] -> {
+      let t = do_difference_only_right(rest, with_right)
+      with_right(
+        k2,
+        v2,
+        fn(combined) { [Pair(k2, combined), ..t] },
+        fn() { [Pair(k2, v2), ..t] },
+      )
+    }
+  }
+}
+
+test difference_with_1() {
+  difference_with(empty, empty, strategy.sum(), strategy.keep()) == empty
+}
+
+test difference_with_2() {
+  let left =
+    empty
+      |> insert(foo, 14)
+      |> insert(bar, 42)
+
+  difference_with(left, empty, strategy.sum(), strategy.keep()) == left
+}
+
+test difference_with_3() {
+  let right =
+    empty
+      |> insert(foo, 14)
+      |> insert(bar, 42)
+
+  difference_with(empty, right, strategy.sum(), strategy.keep()) == right
+}
+
+test difference_with_4() {
+  let left =
+    empty
+      |> insert("a", 100)
+      |> insert("b", 200)
+
+  let right =
+    empty
+      |> insert("a", 150)
+      |> insert("c", 300)
+
+  let result = difference_with(left, right, strategy.sum(), strategy.keep())
+
+  result == from_pairs([Pair("a", 250), Pair("b", 200), Pair("c", 300)])
+}
+
+test difference_with_5() {
+  let left =
+    empty
+      |> insert("a", 100)
+      |> insert("b", 200)
+      |> insert("c", 300)
+
+  let right =
+    empty
+      |> insert("a", 100)
+      |> insert("c", 300)
+
+  let result =
+    difference_with(
+      left,
+      right,
+      strategy.difference_if_non_zero(),
+      strategy.discard(),
+    )
+
+  result == from_pairs([Pair("b", 200)])
+}
+
+test difference_with_6() {
+  let left =
+    empty
+      |> insert("a", 100)
+      |> insert("b", 200)
+
+  let right =
+    empty
+      |> insert("a", 150)
+      |> insert("c", 300)
+
+  let result =
+    difference_with(left, right, strategy.difference(), strategy.negate())
+
+  result == from_pairs([Pair("a", -50), Pair("b", 200), Pair("c", -300)])
+}
+
 /// Keep only the key-value pairs that pass the given predicate.
 ///
 /// ```aiken
@@ -1150,218 +1330,6 @@ test union_with_1() {
   let result = union_with(left, right, with: strategy.sum())
 
   result == from_pairs([Pair(foo, 1351), Pair(bar, 42)])
-}
-
-/// Like [`union_with`](#union_with) but allows specifying the behavior to adopt when a key is present
-/// only in the right dictionary. The first value received correspond to the value in the right
-/// dictionnary. When passing `None`, the value is removed and not present in the union.
-///
-/// ```aiken
-/// let left_dict = dict.from_pairs([Pair("a", 100), Pair("b", 200)])
-/// let right_dict = dict.from_pairs([Pair("a", 150), Pair("c", 300)])
-///
-/// let result =
-///   dict.difference_with(
-///     left_dict,
-///     right_dict,
-///     fn(_k, _v1, _v2, keep, discard) { discard() },
-///     fn(_k, _v2, keep, discard) { keep(_v2) },
-///   )
-///     |> dict.to_pairs()
-///
-/// result == [Pair("b", 200)]
-/// ```
-pub fn difference_with(
-  left: Dict<key, value>,
-  right: Dict<key, value>,
-  with: DifferenceStrategy<ByteArray, value>,
-  with_only_right: DifferenceStrategyOnlySingleValue<ByteArray, value>,
-) -> Dict<key, value> {
-  Dict {
-    inner: do_difference_with(left.inner, right.inner, with, with_only_right),
-  }
-}
-
-fn do_difference_with(
-  left: Pairs<ByteArray, value>,
-  right: Pairs<ByteArray, value>,
-  with: DifferenceStrategy<ByteArray, value>,
-  with_only_right: DifferenceStrategyOnlySingleValue<ByteArray, value>,
-) -> Pairs<ByteArray, value> {
-  when left is {
-    [] -> do_difference_only_right(right, with_only_right)
-    [Pair(k, v), ..rest_left] ->
-      when right is {
-        [] -> left
-        [Pair(k2, v2), ..rest_right] ->
-          if builtin.less_than_bytearray(k, k2) {
-            [
-              Pair(k, v),
-              ..do_difference_with(rest_left, right, with, with_only_right)
-            ]
-          } else if k == k2 {
-            with(
-              k,
-              v,
-              v2,
-              fn(combined) {
-                [
-                  Pair(k, combined),
-                  ..do_difference_with(
-                    rest_left,
-                    rest_right,
-                    with,
-                    with_only_right,
-                  )
-                ]
-              },
-              fn() {
-                do_difference_with(rest_left, rest_right, with, with_only_right)
-              },
-            )
-          } else {
-            with_only_right(
-              k2,
-              v2,
-              fn(combined) {
-                [
-                  Pair(k2, combined),
-                  ..do_difference_with(left, rest_right, with, with_only_right)
-                ]
-              },
-              fn() {
-                do_difference_with(left, rest_right, with, with_only_right)
-              },
-            )
-          }
-      }
-  }
-}
-
-fn do_difference_only_right(
-  self: Pairs<ByteArray, value>,
-  with_only_right: DifferenceStrategyOnlySingleValue<ByteArray, value>,
-) {
-  when self is {
-    [] -> []
-    [Pair(k2, v2), ..rest] -> {
-      let t = do_difference_only_right(rest, with_only_right)
-      with_only_right(
-        k2,
-        v2,
-        fn(combined) { [Pair(k2, combined), ..t] },
-        fn() { [Pair(k2, v2), ..t] },
-      )
-    }
-  }
-}
-
-test difference_with_1() {
-  let with =
-    fn(_k, left, right, keep, _discard) { keep(left + right) }
-  let with_only_right =
-    fn(_k, right, keep, _discard) { keep(right) }
-
-  difference_with(empty, empty, with, with_only_right) == empty
-}
-
-test difference_with_2() {
-  let with =
-    fn(_k, left, right, keep, _discard) { keep(left + right) }
-  let with_only_right =
-    fn(_k, right, keep, _discard) { keep(right) }
-
-  let left =
-    empty
-      |> insert(foo, 14)
-      |> insert(bar, 42)
-
-  difference_with(left, empty, with, with_only_right) == left
-}
-
-test difference_with_3() {
-  let with =
-    fn(_k, left, right, keep, _discard) { keep(left + right) }
-
-  let with_only_right =
-    fn(_k, right, keep, _discard) { keep(right) }
-
-  let right =
-    empty
-      |> insert(foo, 14)
-      |> insert(bar, 42)
-
-  difference_with(empty, right, with, with_only_right) == right
-}
-
-test difference_with_4() {
-  let with =
-    fn(_k, left, right, keep, _discard) { keep(left + right) }
-  let with_only_right =
-    fn(_k, right, keep, _discard) { keep(right) }
-
-  let left =
-    empty
-      |> insert("a", 100)
-      |> insert("b", 200)
-
-  let right =
-    empty
-      |> insert("a", 150)
-      |> insert("c", 300)
-
-  let result = difference_with(left, right, with, with_only_right)
-
-  result == from_pairs([Pair("a", 250), Pair("b", 200), Pair("c", 300)])
-}
-
-test difference_with_5() {
-  let with =
-    fn(_k, left, right, keep, discard) {
-      if left - right == 0 {
-        discard()
-      } else {
-        keep(left - right)
-      }
-    }
-  let with_only_right =
-    fn(_k, _right, _keep, discard) { discard() }
-
-  let left =
-    empty
-      |> insert("a", 100)
-      |> insert("b", 200)
-      |> insert("c", 300)
-
-  let right =
-    empty
-      |> insert("a", 100)
-      |> insert("c", 300)
-
-  let result = difference_with(left, right, with, with_only_right)
-
-  result == from_pairs([Pair("b", 200)])
-}
-
-test difference_with_6() {
-  let with =
-    fn(_k, left, right, keep, _discard) { keep(left - right) }
-  let with_only_right =
-    fn(_k, right, keep, _discard) { keep(-right) }
-
-  let left =
-    empty
-      |> insert("a", 100)
-      |> insert("b", 200)
-
-  let right =
-    empty
-      |> insert("a", 150)
-      |> insert("c", 300)
-
-  let result = difference_with(left, right, with, with_only_right)
-
-  result == from_pairs([Pair("a", -50), Pair("b", 200), Pair("c", -300)])
 }
 
 // ## Transforming
