@@ -1242,6 +1242,58 @@ pub fn reduce(
   )
 }
 
+/// Reduce a value, while accumulating two results. This is
+/// faster (albeit equivalent) than accumulating both results in a `Pair` or tuple.
+///
+/// > [!TIP]
+/// > Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+///
+/// ```aiken
+/// let v =
+///   zero
+///     |> add("a", "1", 5)
+///     |> add("a", "2", 15)
+///     |> add("b", "", 10)
+///
+/// let len, sum <-
+///   reduce2(
+///     v,
+///     0,
+///     0,
+///     fn(_, _, quantity, len, sum, return) { return(len + 1, sum + quantity) },
+///   )
+///
+/// and {
+///   len == 3,
+///   sum == 30,
+/// }
+/// ```
+pub fn reduce2(
+  self: Value,
+  zero_a: a,
+  zero_b: b,
+  with: fn(PolicyId, AssetName, Int, a, b, fn(a, b) -> any) -> any,
+  return: fn(a, b) -> any,
+) -> any {
+  dict.foldr2(
+    self.inner,
+    zero_a,
+    zero_b,
+    fn(policy_id, asset_list, a, b, return) {
+      dict.foldr2(
+        asset_list,
+        a,
+        b,
+        fn(asset_name, quantity, a, b, return) {
+          with(policy_id, asset_name, quantity, a, b, return)
+        },
+        return,
+      )
+    },
+    return,
+  )
+}
+
 test reduce_1() {
   let v =
     zero
@@ -1270,6 +1322,48 @@ test reduce_3() {
   let v = zero
   let result = reduce(v, 1, fn(_, _, quantity, acc) { acc + quantity })
   result == 1
+}
+
+test reduce2_optimized() {
+  let v =
+    zero
+      |> add("a", "1", 5)
+      |> add("a", "2", 15)
+      |> add("b", "", 10)
+
+  let
+    len,
+    sum,
+  <-
+    reduce2(
+      v,
+      0,
+      0,
+      fn(_, _, quantity, len, sum, return) { return(len + 1, sum + quantity) },
+    )
+  and {
+    len == 3,
+    sum == 30,
+  }
+}
+
+test reduce2_classic() {
+  let v =
+    zero
+      |> add("a", "1", 5)
+      |> add("a", "2", 15)
+      |> add("b", "", 10)
+
+  let (len, sum) =
+    reduce(
+      v,
+      (0, 0),
+      fn(_, _, quantity, (len, sum)) { (len + 1, sum + quantity) },
+    )
+  and {
+    len == 3,
+    sum == 30,
+  }
 }
 
 /// Convert the value into a dictionary of dictionaries.
